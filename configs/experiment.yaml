@@ -1,0 +1,44 @@
+# Experiment configuration — all settings fixed across configurations except
+# the defense layer, per the pre-registered design in the thesis proposal.
+
+models:
+  # Two sizes from the same family is the default scope; add the 3b model
+  # only if the pilot shows runtime allows it.
+  - name: qwen2.5:1.5b-instruct-q4_K_M
+    label: qwen2.5-1.5b
+    params_b: 1.5
+  - name: qwen2.5:7b-instruct-q4_K_M
+    label: qwen2.5-7b
+    params_b: 7.0
+
+defenses:
+  - none        # baseline
+  - delimiter   # Defense A: mark retrieved documents as untrusted
+  - filter      # Defense B: rule-based quarantine of suspicious documents
+  - both        # Defense A + Defense B
+
+retrieval:
+  embedding_model: sentence-transformers/all-MiniLM-L6-v2
+  top_k: 5
+  # distractor documents indexed alongside the target/poisoned document;
+  # retrieval hit rate is measured per attack case
+  num_distractors: 20
+
+generation:
+  temperature: 0.0
+  seed: 42
+  num_predict: 256
+  # Context window: prompts average ~2.7k and peak ~3.9k tokens (21 retrieved
+  # emails). Ollama's default num_ctx would silently truncate them.
+  num_ctx: 8192
+  ollama_url: http://localhost:11434
+
+data:
+  cases_file: data/processed/cases_test.jsonl
+  dev_cases_file: data/processed/cases_dev.jsonl
+  adaptive_cases_file: data/processed/cases_adaptive.jsonl
+  # quarantine = drop flagged documents from context; alternative: redact
+  filter_action: quarantine
+
+paths:
+  results_dir: results
