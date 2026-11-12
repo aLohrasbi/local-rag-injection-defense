@@ -1,4 +1,4 @@
-requests>=2.31
-numpy>=1.26
-sentence-transformers>=3.0
-PyYAML>=6.0
+requests==2.32.3
+numpy==1.26.4
+sentence-transformers==3.2.1
+PyYAML==6.0.2
