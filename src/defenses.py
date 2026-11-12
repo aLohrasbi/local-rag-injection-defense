@@ -3,20 +3,22 @@
 Defense A — delimiter marking (spotlighting-lite): retrieved documents are
 wrapped in explicit untrusted-content delimiters and the system prompt states
 that delimited content is data, never instructions. Mirrors the border-string
-meta-prompting defense family evaluated in BIPIA.
+meta-prompting defense family evaluated in BIPIA and Spotlighting.
 
 Defense B — rule-based filter: keyword/regex heuristics flag suspicious
 imperative content in retrieved documents. Flagged documents are quarantined
 (removed from the context) and the event is logged so false positives on
-benign documents can be measured. The rule list is tuned on the dev split
-ONLY, then frozen before evaluation runs (see src/data.py for the split).
+benign documents can be measured. The evaluation canary tail is stripped before
+rule matching so the filter never triggers on the harness itself.
 """
 
 from __future__ import annotations
 
 import re
+from copy import deepcopy
 from dataclasses import dataclass, field
 
+from .data import strip_canary_wrapper
 from .types import RetrievedDoc
 
 # ---------------------------------------------------------------------------
@@ -61,22 +63,22 @@ FILTER_RULES: list[tuple[str, str, re.Pattern]] = [
      re.compile(r"ignore\s+(all\s+)?(previous|prior|above|earlier)\s+(instructions?|prompts?|rules?)", re.I)),
     ("disregard",
      "instruction to disregard instructions",
-     re.compile(r"disregard\s+(all\s+)?(previous|prior|above|earlier|the)\s+(instructions?|prompts?|rules?|directions?)", re.I)),
+     re.compile(r"disregard\s+(all\s+)?(previous|prior|above|earlier|the|user's)\s+(instructions?|prompts?|rules?|directions?|question)", re.I)),
     ("role_hijack",
      "claims a new system/assistant role",
      re.compile(r"(you\s+are\s+now|act\s+as|from\s+now\s+on\s+you\s+are|new\s+instructions?:)", re.I)),
     ("system_tag",
      "fake system/assistant message tags",
-     re.compile(r"</?\s*(system|assistant|developer)\s*>|SYSTEM\s+(MESSAGE|NOTE|PROMPT)\s*:", re.I)),
+     re.compile(r"</?\s*(system|assistant|developer|untrusted_document)\s*>|SYSTEM\s+(MESSAGE|NOTE|PROMPT)\s*:", re.I)),
     ("instruction_header",
      "explicit instruction block header",
      re.compile(r"(instructions?\s+for\s+the\s+(ai|assistant|model|llm)|\bAI\s+ASSISTANT\s+INSTRUCTIONS?\b)", re.I)),
     ("must_obey",
      "imperative demand directed at the assistant",
-     re.compile(r"(you\s+must|you\s+are\s+required\s+to|it\s+is\s+mandatory\s+(that|to))\s+(now\s+)?(follow|obey|comply|output|print|repeat|reveal|ignore)", re.I)),
+     re.compile(r"(you\s+must|you\s+are\s+required\s+to|it\s+is\s+mandatory\s+(that|to))\s+(now\s+|also\s+)?(follow|obey|comply|output|print|repeat|reveal|ignore)", re.I)),
     ("priority_override",
      "claims higher priority than system instructions",
-     re.compile(r"(highest|top)\s+priority|overrides?\s+(all|any)\s+(previous|other|system)", re.I)),
+     re.compile(r"(highest|top)\s+priority|overrides?\s+(all\s+|any\s+)?(previous|prior|other|system)", re.I)),
     ("reveal_prompt",
      "asks to reveal system prompt or instructions",
      re.compile(r"(print|reveal|repeat|output|show)\s+(me\s+)?(your|the)\s+(system\s+)?(prompt|instructions)", re.I)),
@@ -93,7 +95,8 @@ class RuleFilter:
         self.action = action
 
     def matched_rules(self, text: str) -> list[str]:
-        return [rule_id for rule_id, _desc, rx in self.rules if rx.search(text)]
+        clean = strip_canary_wrapper(text)
+        return [rule_id for rule_id, _desc, rx in self.rules if rx.search(clean)]
 
     def apply(self, retrieved: list[RetrievedDoc]) -> DefenseDecision:
         decision = DefenseDecision(kept_docs=[], quarantined=[], filter_reasons={})
@@ -104,12 +107,10 @@ class RuleFilter:
                 if self.action == "quarantine":
                     decision.quarantined.append(item)
                     continue
-                # redact: keep the document with matched regions stripped
                 redacted = item.doc.text
                 for rule_id, _desc, rx in self.rules:
                     if rule_id in hits:
                         redacted = rx.sub("[filtered]", redacted)
-                from copy import deepcopy
                 kept = RetrievedDoc(
                     doc=deepcopy(item.doc), score=item.score, rank=item.rank)
                 kept.doc.text = redacted
@@ -132,18 +133,10 @@ BASE_SYSTEM = (
 
 def apply_defenses(retrieved: list[RetrievedDoc], defense: str,
                    rule_filter: RuleFilter | None = None) -> DefenseDecision:
-    """Apply the named defense configuration to one retrieval result.
-
-    defense in {"none", "delimiter", "filter", "both"}.
-    """
-    if defense == "none":
+    """Apply the named defense configuration to one retrieval result."""
+    if defense in ("none", "delimiter"):
         return DefenseDecision(kept_docs=list(retrieved))
-    if defense == "delimiter":
-        return DefenseDecision(kept_docs=list(retrieved))
-    if defense == "filter":
-        assert rule_filter is not None
-        return rule_filter.apply(retrieved)
-    if defense == "both":
+    if defense in ("filter", "both"):
         assert rule_filter is not None
         return rule_filter.apply(retrieved)
     raise ValueError(f"unknown defense: {defense}")

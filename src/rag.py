@@ -1,8 +1,9 @@
 """Minimal local RAG pipeline.
 
 One case flows: question -> embed -> top-k retrieval -> (defense layer) ->
-prompt construction -> local LLM -> response. The only thing that varies
-between experimental configurations is the defense layer.
+prompt construction -> local LLM -> response. Supports optional forced
+retrieval (guarantees target doc in top-k) and trusted-canary positive control
+(places injection instruction in the trusted system prompt).
 """
 
 from __future__ import annotations
@@ -34,13 +35,24 @@ class RAGPipeline:
             for d in docs
         ])
 
-    def answer(self, question: str, defense: str
+    def answer(self, question: str, defense: str,
+               forced_doc_id: str | None = None,
+               trusted_injection: str | None = None
                ) -> tuple[GenerationResult, dict]:
         retrieved: list[RetrievedDoc] = self.retriever.search(question, self.top_k)
+        if forced_doc_id and all(r.doc.doc_id != forced_doc_id for r in retrieved):
+            for d in self.retriever.docs:
+                if d.doc_id == forced_doc_id:
+                    forced = RetrievedDoc(doc=d, score=0.0, rank=len(retrieved) or 1)
+                    retrieved = (retrieved[:-1] + [forced]) if retrieved else [forced]
+                    break
         decision = apply_defenses(retrieved, defense, self.rule_filter)
         context = build_context(decision, defense)
         prompt = USER_TEMPLATE.format(context=context, question=question)
-        result = self.llm.generate(prompt, system=system_prompt_for(defense))
+        sys_prompt = system_prompt_for(defense)
+        if trusted_injection:
+            sys_prompt = f"{sys_prompt}\n\n{trusted_injection}"
+        result = self.llm.generate(prompt, system=sys_prompt)
         info = {
             "docs_retrieved": [r.doc.doc_id for r in retrieved],
             "filter_flagged_docs": list(decision.filter_reasons.keys()),
