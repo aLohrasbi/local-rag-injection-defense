@@ -189,5 +189,3 @@ python scripts/make_figure.py --results results/results.jsonl --out results/secu
 ```
 
 Pass `--resume` to any `run_experiment.py` command to continue an interrupted run, or `--rescore results/results.jsonl` to re-run answer and canary scoring offline.
-
-```
