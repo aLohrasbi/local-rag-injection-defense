@@ -1,113 +1,66 @@
-"""Integrity checks for the built dataset — pure stdlib, no LLM/embeddings.
+"""Integrity checks for the case-file schema, run on the synthetic tests/fixtures/ dataset.
 
-    python -m pytest tests/test_data_build.py -q
-or directly:  python tests/test_data_build.py
-
-Skips gracefully when data/processed/ has not been built yet.
+The fixtures use exactly the JSONL schema of data/processed/, so these checks do not
+depend on the real data being built. The real files are audited separately by
+tests/test_real_data.py (marker: data).
 """
 
 from __future__ import annotations
 
-import json
 import re
-import sys
-from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-
-PROC = Path(__file__).resolve().parents[1] / "data" / "processed"
 CANARY_RX = re.compile(r"^[A-Z0-9]{4}-[A-Z0-9]{5}$")
 
 
-def _load(name: str) -> list[dict] | None:
-    path = PROC / name
-    if not path.exists():
-        return None
-    with open(path, encoding="utf-8") as fh:
-        return [json.loads(line) for line in fh if line.strip()]
+def _attacks(rows: list[dict]) -> list[dict]:
+    return [r for r in rows if r["kind"] == "attack"]
 
 
-def _rows() -> list[dict] | None:
-    rows = _load("cases_test.jsonl")
-    if rows is None:
-        print("SKIP: dataset not built — run scripts/download_data.py first")
-    return rows
+def _benign(rows: list[dict]) -> list[dict]:
+    return [r for r in rows if r["kind"] == "benign"]
 
 
-def test_dataset_built():
-    if _load("cases_test.jsonl") is None:
-        print("SKIP: dataset not built — run scripts/download_data.py first")
-        return
-    assert _load("cases_dev.jsonl") is not None, "cases_dev.jsonl missing"
-    assert _load("cases_adaptive.jsonl") is not None, "cases_adaptive.jsonl missing"
+def test_fixtures_have_expected_shape(cases_dev, cases_test, cases_adaptive):
+    assert len(_attacks(cases_dev)) == 8 and len(_benign(cases_dev)) == 4
+    assert len(_attacks(cases_test)) == 12 and len(_benign(cases_test)) == 6
+    assert len(cases_adaptive) == 3
+    required = {"id", "kind", "split", "question", "reference_answers", "docs"}
+    for r in cases_dev + cases_test + cases_adaptive:
+        assert required <= set(r), r["id"]
 
 
-def test_benign_cases_are_answerable():
-    rows = _rows()
-    if rows is None:
-        return
-    benign = [r for r in rows if r["kind"] == "benign"]
-    assert benign, "no benign cases built"
+def test_benign_cases_are_answerable(cases_test):
+    benign = _benign(cases_test)
+    assert benign
     for r in benign:
         assert r["reference_answers"], f"{r['id']}: benign case without reference answer"
-        assert all(a.strip().lower() != "unknown" for a in r["reference_answers"]), \
-            f"{r['id']}: 'unknown' reference would inflate containment accuracy"
+        assert all(a.strip().lower() != "unknown" for a in r["reference_answers"])
 
 
-def test_attack_canaries_unique_and_wellformed():
-    rows = _rows()
-    if rows is None:
-        return
-    attacks = [r for r in rows if r["kind"] == "attack"]
-    canaries = [r["canary"] for r in attacks]
+def test_attack_canaries_unique_and_wellformed(cases_dev, cases_test, cases_adaptive):
+    canaries = [r["canary"] for r in _attacks(cases_dev + cases_test)] + [r["canary"] for r in cases_adaptive]
     assert len(set(canaries)) == len(canaries), "canary collision across attack cases"
-    for c in canaries:
-        assert CANARY_RX.match(c), f"canary not in XXXX-XXXXX format: {c}"
+    assert all(CANARY_RX.match(c) for c in canaries)
 
 
-def test_attack_docs_carry_poisoned_target():
-    rows = _rows()
-    if rows is None:
-        return
-    for r in (x for x in rows if x["kind"] == "attack"):
+def test_attack_docs_carry_poisoned_target(cases_test):
+    for r in _attacks(cases_test):
         targets = [d for d in r["docs"] if d["doc_id"] == r["poisoned_doc"]]
         assert len(targets) == 1 and targets[0].get("poisoned") is True, r["id"]
-        assert r["canary"] in targets[0]["text"], \
-            f"{r['id']}: canary missing from the poisoned document text"
+        assert r["canary"] in targets[0]["text"], f"{r['id']}: canary missing from poisoned text"
 
 
-def test_benign_docs_not_poisoned():
-    rows = _rows()
-    if rows is None:
-        return
-    for r in (x for x in rows if x["kind"] == "benign"):
-        assert not any(d.get("poisoned") for d in r["docs"]), \
-            f"{r['id']}: benign case contains a poisoned document"
+def test_benign_docs_not_poisoned(cases_test):
+    for r in _benign(cases_test):
+        assert not any(d.get("poisoned") for d in r["docs"]), r["id"]
 
 
-def test_dev_test_disjoint_by_source():
-    dev, test = _load("cases_dev.jsonl"), _load("cases_test.jsonl")
-    if dev is None or test is None:
-        print("SKIP: dataset not built — run scripts/download_data.py first")
-        return
-    dev_sources = {c["id"].rsplit("-", 1)[0] for c in dev}
-    test_sources = {c["id"].rsplit("-", 1)[0] for c in test}
-    assert not (dev_sources & test_sources), \
-        "source-email leakage between dev and test splits"
+def test_dev_test_disjoint_by_source(cases_dev, cases_test):
+    dev_sources = {c["id"].rsplit("-", 1)[0] for c in cases_dev}
+    test_sources = {c["id"].rsplit("-", 1)[0] for c in cases_test}
+    assert not (dev_sources & test_sources)
 
 
-def test_split_labels_match_files():
-    dev, test = _load("cases_dev.jsonl"), _load("cases_test.jsonl")
-    if dev is None or test is None:
-        print("SKIP: dataset not built — run scripts/download_data.py first")
-        return
-    assert all(c["split"] == "dev" for c in dev), "dev file contains non-dev rows"
-    assert all(c["split"] == "test" for c in test), "test file contains non-test rows"
-
-
-if __name__ == "__main__":
-    for name, fn in sorted(list(globals().items())):
-        if name.startswith("test_") and callable(fn):
-            fn()
-            print(f"PASS {name}")
-    print("all tests passed")
+def test_split_labels_match_files(cases_dev, cases_test):
+    assert all(c["split"] == "dev" for c in cases_dev)
+    assert all(c["split"] == "test" for c in cases_test)
