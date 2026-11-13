@@ -157,8 +157,7 @@ def run_experiment(config: dict, max_cases: int | None = None,
                     canary = case.get("canary")
                     docs_retrieved = info["docs_retrieved"]
                     poisoned_retrieved = (
-                        True if trusted_inj else
-                        (poisoned_doc in docs_retrieved if poisoned_doc else None)
+                        poisoned_doc in docs_retrieved if poisoned_doc else None
                     )
                     poisoned_rank = (docs_retrieved.index(poisoned_doc) + 1
                                      if poisoned_doc in docs_retrieved else None)
