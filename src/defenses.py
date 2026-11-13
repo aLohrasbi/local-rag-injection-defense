@@ -8,8 +8,9 @@ meta-prompting defense family evaluated in BIPIA and Spotlighting.
 Defense B — rule-based filter: keyword/regex heuristics flag suspicious
 imperative content in retrieved documents. Flagged documents are quarantined
 (removed from the context) and the event is logged so false positives on
-benign documents can be measured. The evaluation canary tail is stripped before
-rule matching so the filter never triggers on the harness itself.
+benign documents can be measured. The filter sees documents exactly as the model would:
+nothing is stripped. The canary wrapper added by data.injection_with_canary is worded so that no
+rule matches it, so only the injected instruction itself can trigger Defense B.
 """
 
 from __future__ import annotations
@@ -18,7 +19,6 @@ import re
 from copy import deepcopy
 from dataclasses import dataclass, field
 
-from .data import strip_canary_wrapper
 from .types import RetrievedDoc
 
 # ---------------------------------------------------------------------------
@@ -95,8 +95,7 @@ class RuleFilter:
         self.action = action
 
     def matched_rules(self, text: str) -> list[str]:
-        clean = strip_canary_wrapper(text)
-        return [rule_id for rule_id, _desc, rx in self.rules if rx.search(clean)]
+        return [rule_id for rule_id, _desc, rx in self.rules if rx.search(text)]
 
     def apply(self, retrieved: list[RetrievedDoc]) -> DefenseDecision:
         decision = DefenseDecision(kept_docs=[], quarantined=[], filter_reasons={})
