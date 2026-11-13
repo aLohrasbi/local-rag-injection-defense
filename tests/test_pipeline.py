@@ -157,6 +157,9 @@ def test_b8_positive_control_instruction_only_in_trusted_prompt(cfg):
     rows = _rows(cfg)
     assert {r["defense"] for r in rows} == {"positive_control"}
     assert all(r["mode"] == "positive_control" and r["annotation"] for r in rows)
+    unanswerable = {c["id"] for c in attacks if not c["answerable"]}
+    for r in rows:
+        assert r["poisoned_retrieved"] == (r["case_id"] not in unanswerable)
 
 
 def test_b8_main_run_by_contrast_shows_the_injection_in_the_context(cfg):
@@ -177,8 +180,6 @@ def test_b8_positive_control_needs_clean_text(cfg, tmp_path):
     cfg["data"]["cases_file"] = str(legacy)
     with pytest.raises(ValueError, match="clean_text"):
         _run(cfg, positive_control=True)
-
-
 # ----------------------------------------------------------------- B9 resume
 
 def test_b9_rows_are_flushed_before_the_next_llm_call(cfg):

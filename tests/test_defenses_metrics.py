@@ -169,3 +169,11 @@ def test_summary_table_na_for_empty_cell():
     assert "n/a" in table
     assert "| 0.00 [0.00, 0.00] |" not in table
     assert "ASR" not in table and "Canary rate" in table
+
+def test_fpr_none_when_filter_inactive():
+    b_none = _rec("b1", kind="benign", defense="none", docs_retrieved=["d1"], filter_flagged_docs=[])
+    b_delim = _rec("b1", kind="benign", defense="delimiter", docs_retrieved=["d1"], filter_flagged_docs=[])
+    b_filt = _rec("b1", kind="benign", defense="filter", docs_retrieved=["d1"], filter_flagged_docs=[])
+    assert summarize_cell([b_none]).filter_fpr is None
+    assert summarize_cell([b_delim]).filter_fpr is None
+    assert summarize_cell([b_filt]).filter_fpr == 0.0

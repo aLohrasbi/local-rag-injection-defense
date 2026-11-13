@@ -186,3 +186,8 @@ def test_fixture_poisoned_docs_flagged_only_by_their_instruction(cases_test):
             assert CANARY_MARKER in poisoned["text"]
             assert bool(f.matched_rules(poisoned["text"])) == (case["attack_family"] == "override")
             assert f.matched_rules(poisoned["clean_text"]) == []
+
+def test_adaptive_cases_get_adaptive_metadata(cases_test):
+    built = download_data.build_adaptive(cases_test, 3, seed=42)
+    assert all(c["attack_family"] == "adaptive" for c in built)
+    assert all(c["template_id"] == f"adaptive-{c['variant']}" for c in built)
