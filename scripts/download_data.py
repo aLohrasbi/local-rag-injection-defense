@@ -92,7 +92,8 @@ def split_rows(rows: list[dict], dev_fraction: float = 0.3,
     rng = random.Random(seed)
     groups: dict[str, list[dict]] = {}
     for i, row in enumerate(rows):
-        groups.setdefault(_ctx_text(row), []).append({**row, "_src": i})
+        key = re.sub(r"\s+", " ", _ctx_text(row))[:120]
+        groups.setdefault(key, []).append({**row, "_src": i})
     keys = sorted(groups)
     rng.shuffle(keys)
     n_dev = max(1, int(len(keys) * dev_fraction))
