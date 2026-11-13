@@ -1,0 +1,10 @@
+# Everything the unit tests and CI need. Deliberately excludes sentence-transformers
+# (and therefore torch): tests use a hashing retriever and FakeLLM, never Ollama.
+numpy==1.26.4
+requests==2.32.3
+PyYAML==6.0.2
+pytest>=8.0
+ruff>=0.6
+mypy>=1.10
+types-requests
+types-PyYAML

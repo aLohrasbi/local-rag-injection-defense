@@ -1,0 +1,34 @@
+[project]
+name = "local-rag-injection-defense"
+version = "0.1.0"
+description = "Security-utility trade-offs of lightweight defenses against indirect prompt injection in local RAG."
+requires-python = ">=3.11"
+
+[tool.ruff]
+line-length = 110
+target-version = "py311"
+extend-exclude = ["data/raw"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B"]
+# Long lines are tolerated: FILTER_RULES regexes are a frozen rule set and are not reflowed.
+ignore = ["E501"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["src", "tests"]
+
+[tool.mypy]
+python_version = "3.11"
+mypy_path = "."
+explicit_package_bases = true
+ignore_missing_imports = true
+check_untyped_defs = true
+warn_unused_ignores = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+addopts = "-q"
+markers = [
+    "data: audits of the real data/processed/ files (skipped when absent; not run in CI)",
+]
