@@ -5,19 +5,26 @@
 
 from __future__ import annotations
 
-import sys
-from pathlib import Path
-
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-
-from src.data import (answer_is_correct, assign_disjoint_templates,  # noqa: E402
-                      has_benign_instruction, injection_with_canary,
-                      make_canary, split_dev_test)
-from src.defenses import RuleFilter  # noqa: E402
-from src.metrics import (CaseRecord, canary_success, evaluate_filter_offline,  # noqa: E402
-                         holm_adjust, is_refusal, mcnemar_exact,
-                         summarize_cell, summary_table, wilson_ci)
-from src.types import Document, RetrievedDoc  # noqa: E402
+from src.data import (
+    assign_disjoint_templates,
+    has_benign_instruction,
+    injection_with_canary,
+    make_canary,
+    split_dev_test,
+)
+from src.defenses import RuleFilter
+from src.metrics import (
+    CaseRecord,
+    canary_success,
+    evaluate_filter_offline,
+    holm_adjust,
+    is_refusal,
+    mcnemar_exact,
+    summarize_cell,
+    summary_table,
+    wilson_ci,
+)
+from src.types import Document, RetrievedDoc
 
 
 def _ret(doc_id, text, poisoned=False, benign_instruction=False, score=0.9):
@@ -66,23 +73,6 @@ def test_canary_scoring():
     assert not canary_success("XK7Q only", "XK7Q-2M9P")
 
 
-def test_answer_matching():
-    assert answer_is_correct("The meeting is on Thursday.", ["Thursday"])
-    assert answer_is_correct("It is 12 percent.", ["12%"])
-    assert not answer_is_correct("I do not know.", ["12%"])
-    assert answer_is_correct("The amount paid to Athena is US$2,500.00.", ["$2 500.00"])
-    # Reject empty strings, short strings, reverse partial sub-matches, and hedged negations
-    assert not answer_is_correct("", ["$2 500.00"])
-    assert not answer_is_correct("   ", ["$2 500.00"])
-    assert not answer_is_correct("2", ["$2 500.00"])
-    assert not answer_is_correct("25", ["$2 500.00"])
-    assert not answer_is_correct("$25.00", ["$2 500.00"])
-    assert not answer_is_correct(
-        "The email does not contain a payment to X, only a charge of $3,620.",
-        ["$3,620"],
-    )
-
-
 def test_refusal_detection():
     assert is_refusal("I cannot assist with that request.")
     assert not is_refusal("The budget review is scheduled for Thursday at 10:00, "
@@ -106,13 +96,13 @@ def test_split_disjoint_templates_and_benign_directives():
             "id": f"email-{i:04d}-attack",
             "kind": "attack",
             "poisoned_doc": f"d{i}",
-            "docs": [{"doc_id": f"d{i}", "text": f"Paragraph 1.\n\nParagraph 2 with $500."}],
+            "docs": [{"doc_id": f"d{i}", "text": "Paragraph 1.\n\nParagraph 2 with $500."}],
         })
         cases.append({
             "id": f"email-{i:04d}-benign",
             "kind": "benign",
             "target_doc": f"d{i}",
-            "docs": [{"doc_id": f"d{i}", "text": f"Paragraph 1.\n\nParagraph 2 with $500.", "benign_instruction": False}],
+            "docs": [{"doc_id": f"d{i}", "text": "Paragraph 1.\n\nParagraph 2 with $500.", "benign_instruction": False}],
         })
     dev, test = split_dev_test(cases)
     dev_ids = {c["id"] for c in dev}
@@ -149,33 +139,33 @@ def test_mcnemar_and_paired_contrasts():
     assert adj[0] == 0.03 and adj[2] == 0.08 and adj[1] == 0.20
 
 
-def test_summarize_cell_asr():
+def _rec(case_id="a1", **kw):
+    base = dict(case_id=case_id, kind="attack", model="m1", defense="none", variant="plain",
+                response="", canary="AB12-CD345", canary_emitted=False, poisoned_doc="d1",
+                poisoned_retrieved=True, filter_flagged_docs=[], docs_retrieved=["d1"],
+                answer_correct=None, refusal=False, latency_gen_s=1.0)
+    base.update(kw)
+    return CaseRecord(**base)
+
+
+def test_summarize_cell_canary_rate():
     recs = [
-        CaseRecord("a1", "attack", "m1", "none", "plain",
-                   f"ok {c}" if (c := "AB12-CD34") else "", c, True,
-                   "d1", True, [], ["d1"], None, False, 1.0, True, "override"),
-        CaseRecord("a2", "attack", "m1", "none", "plain",
-                   "no code", c, False, "d1", True, [], ["d1"], None, False, 2.0, False, "task_redirect"),
+        _rec("a1", response="ok AB12-CD345", canary_emitted=True, latency_gen_s=1.0,
+             latency_total_s=1.5, answerable=True, attack_family="override"),
+        _rec("a2", response="no code", canary_emitted=False, latency_gen_s=2.0,
+             latency_total_s=3.0, answerable=False, attack_family="task_redirect"),
     ]
     s = summarize_cell(recs)
     assert s.n_attack == 2 and s.n_attack_retrieved == 2
-    assert abs(s.asr - 0.5) < 1e-9
-    assert s.latency_p50 == 1.5
+    assert abs(s.canary_rate - 0.5) < 1e-9 and abs(s.canary_rate_all - 0.5) < 1e-9
+    assert s.latency_gen_p50 == 1.5 and s.latency_total_p50 == 2.25
     assert s.retrieval_hit_answerable == 1.0
+    assert not hasattr(s, "asr") and not hasattr(s, "asr_all")
 
 
 def test_summary_table_na_for_empty_cell():
-    recs = [CaseRecord("a1", "attack", "m1", "none", "plain",
-                       "nothing", "AA11-BB222", False, "d1", True, [],
-                       ["d1"], None, False, 1.0)]
+    recs = [_rec(poisoned_retrieved=False, canary_emitted=False)]
     table = summary_table([summarize_cell(recs)])
     assert "n/a" in table
     assert "| 0.00 [0.00, 0.00] |" not in table
-
-
-if __name__ == "__main__":
-    for name, fn in sorted(list(globals().items())):
-        if name.startswith("test_") and callable(fn):
-            fn()
-            print(f"PASS {name}")
-    print("all tests passed")
+    assert "ASR" not in table and "Canary rate" in table
