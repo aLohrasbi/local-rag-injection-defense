@@ -2,7 +2,7 @@
 
     python scripts/run_experiment.py [--max-cases N] [--dry-run] [--adaptive]
                                      [--forced-retrieval] [--positive-control]
-                                     [--stability-check] [--filter-audit]
+                                     [--stability-check] [--filter-audit] [--resume]
                                      [--rescore results/results.jsonl]
 """
 
@@ -20,9 +20,16 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from src.data import answer_is_correct, load_cases  # noqa: E402
 from src.defenses import RuleFilter  # noqa: E402
-from src.metrics import (CaseRecord, canary_success, evaluate_filter_offline,  # noqa: E402
-                         is_refusal, paired_defense_tests, summarize_cell,
-                         summary_table)
+from src.metrics import (  # noqa: E402
+    CaseRecord,
+    canary_success,
+    evaluate_filter_offline,
+    is_refusal,
+    paired_defense_tests,
+    record_from_row,
+    summarize_cell,
+    summary_table,
+)
 from src.runner import run_experiment  # noqa: E402
 
 
@@ -39,13 +46,16 @@ def rescore_file(results_path: Path, cases_path: Path) -> str:
             case = cases_by_id.get(cid, {})
             if row["kind"] == "benign":
                 refs = case.get("reference_answers", [])
-                row["answer_correct"] = answer_is_correct(row["response"], refs)
+                score = answer_is_correct(row["response"], refs)
+                row["answer_correct"] = score.strict
+                row["answer_lenient"] = score.lenient
+                row["answer_hedged"] = score.hedged
             elif row.get("canary"):
                 row["canary_emitted"] = canary_success(row["response"], row["canary"])
             row["refusal"] = is_refusal(row["response"])
             row.setdefault("answerable", case.get("answerable", bool(case.get("reference_answers"))))
             row.setdefault("attack_family", case.get("attack_family", "task_redirect"))
-            records.append(CaseRecord(**row))
+            records.append(record_from_row(row))
 
     with open(results_path, "w", encoding="utf-8") as out:
         for r in records:
@@ -87,6 +97,8 @@ def main() -> None:
                     help="force the target poisoned email into top-k context")
     ap.add_argument("--positive-control", action="store_true",
                     help="place canary instruction in trusted system prompt")
+    ap.add_argument("--resume", action="store_true",
+                    help="continue an interrupted run: skip (mode, model, defense, case) rows already in results.jsonl")
     ap.add_argument("--stability-check", action="store_true",
                     help="re-run a sample of cell 1 to verify determinism")
     ap.add_argument("--filter-audit", action="store_true",
@@ -121,6 +133,7 @@ def main() -> None:
         forced_retrieval=args.forced_retrieval,
         positive_control=args.positive_control,
         stability_check=args.stability_check,
+        resume=args.resume,
     )
     if args.dry_run:
         print("dry-run complete — no models were called.")
