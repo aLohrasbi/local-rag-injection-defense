@@ -8,6 +8,7 @@ every model/configuration cell of the experiment uses identical sampling.
 from __future__ import annotations
 
 import time
+from collections.abc import Callable
 from dataclasses import dataclass
 
 import requests
@@ -85,3 +86,36 @@ class OllamaClient:
             return False
         names = [m.get("name", "") for m in resp.json().get("models", [])]
         return name in names
+
+
+class FakeLLM(OllamaClient):
+    """Offline stand-in for OllamaClient (tests/CI): no network, no Ollama, deterministic.
+
+    `script` is either a list of replies (cycled in call order) or a callable
+    (prompt, system) -> reply. Every call is recorded in `calls` as (prompt, system).
+    `delay_s` simulates generation time so latency bookkeeping can be tested.
+    """
+
+    def __init__(self, script: list[str] | Callable[[str, str | None], str] | None = None,
+                 delay_s: float = 0.0, model: str = "fake"):
+        super().__init__(model=model)
+        self.script = script if script else [""]
+        self.delay_s = delay_s
+        self.calls: list[tuple[str, str | None]] = []
+
+    def generate(self, prompt: str, system: str | None = None) -> GenerationResult:
+        self.calls.append((prompt, system))
+        if self.delay_s:
+            time.sleep(self.delay_s)
+        if callable(self.script):
+            text = self.script(prompt, system)
+        else:
+            text = self.script[(len(self.calls) - 1) % len(self.script)]
+        return GenerationResult(text=text, latency_s=self.delay_s, prompt_tokens=len(prompt.split()),
+                                eval_tokens=len(text.split()), tokens_per_s=0.0)
+
+    def is_up(self) -> bool:
+        return True
+
+    def has_model(self, name: str) -> bool:
+        return True
