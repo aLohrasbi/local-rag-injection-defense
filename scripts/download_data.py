@@ -36,6 +36,7 @@ from src.data import (  # noqa: E402
 )
 
 REPO = "https://github.com/microsoft/BIPIA"
+BIPIA_COMMIT = "a02cbb2eb8bc1fb1fb4ec0f4ca3cb70eb9dd45f8"
 RAW_DIR = Path("data/raw/BIPIA")
 OUT_DIR = Path("data/processed")
 N_DISTRACTORS = 20
@@ -212,6 +213,8 @@ def build_adaptive(cases: list[dict], n: int, seed: int) -> list[dict]:
         new_case = json.loads(json.dumps(case))
         new_case["id"] = f"{case['id']}-adaptive-{i}"
         new_case["variant"] = variant
+        new_case["attack_family"] = "adaptive"
+        new_case["template_id"] = f"adaptive-{variant}"
         new_case["canary"] = canary
         raw = ADAPTIVE_VARIANTS[variant]
         injected = injection_with_canary(raw, canary)
